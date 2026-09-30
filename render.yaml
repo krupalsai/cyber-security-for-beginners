@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: osint-web-console
+    runtime: node
+    plan: free
+    buildCommand: "true"
+    startCommand: node server.js
+    envVars:
+      - key: APP_PASSWORD
+        sync: false
+      - key: SHODAN_API_KEY
+        sync: false
+      - key: QWEN_API_KEY
+        sync: false
+      - key: QWEN_MODEL
+        value: qwen-plus
+      - key: SPIDERFOOT_URL
+        sync: false

@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OSINT Web Console</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <script src="vendor/vis-network.min.js" defer></script>
+  <script src="vendor/marked.min.js" defer></script>
+  <script src="vendor/purify.min.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo">&gt;_</span> OSINT Web Console</div>
+    <nav class="tabs" role="tablist">
+      <button data-tab="home" class="active">Home</button>
+      <button data-tab="shodan">Shodan</button>
+      <button data-tab="spiderfoot">SpiderFoot</button>
+      <button data-tab="graph">Maltego Graph</button>
+      <button data-tab="ai">Qwen AI</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- HOME -->
+    <section id="tab-home" class="panel active">
+      <h1>Kali-style OSINT tools in your browser</h1>
+      <p class="muted">Run Shodan lookups, SpiderFoot scans, Maltego-style link graphs and ask Qwen AI to
+        explain the results — from any phone or computer.</p>
+      <div class="cards" id="status-cards"></div>
+      <div class="notice">
+        <strong>Use responsibly.</strong> Only investigate systems, domains and people you own or have
+        written permission to assess. Passive lookups (Shodan, DNS) are generally fine; active scanning of
+        third-party systems may be illegal where you live.
+      </div>
+    </section>
+
+    <!-- SHODAN -->
+    <section id="tab-shodan" class="panel">
+      <h2>Shodan</h2>
+      <div class="grid2">
+        <form class="card" data-action="shodan-host">
+          <h3>Host lookup</h3>
+          <label>IP address<input name="ip" placeholder="8.8.8.8" required></label>
+          <button>Look up</button>
+        </form>
+        <form class="card" data-action="shodan-search">
+          <h3>Search</h3>
+          <label>Shodan query<input name="query" placeholder='apache country:"IN"' required></label>
+          <p class="hint">Search filters need a paid Shodan plan. Use "Count" for free facet totals.</p>
+          <div class="row"><button>Search</button><button type="button" data-alt="shodan-count" class="secondary">Count</button></div>
+        </form>
+        <form class="card" data-action="shodan-domain">
+          <h3>Domain / subdomains</h3>
+          <label>Domain<input name="domain" placeholder="example.com" required></label>
+          <div class="row"><button>Subdomains</button><button type="button" data-alt="shodan-resolve" class="secondary">Resolve</button></div>
+        </form>
+        <form class="card" data-action="shodan-info">
+          <h3>API plan &amp; credits</h3>
+          <p class="hint">Shows your remaining query and scan credits.</p>
+          <button>Check</button>
+        </form>
+      </div>
+      <div id="shodan-out" class="output"></div>
+    </section>
+
+    <!-- SPIDERFOOT -->
+    <section id="tab-spiderfoot" class="panel">
+      <h2>SpiderFoot</h2>
+      <div class="grid2">
+        <form class="card" data-action="sf-start">
+          <h3>New scan</h3>
+          <label>Target (domain, IP, e-mail, username, phone…)<input name="target" placeholder="example.com" required></label>
+          <label>Scan name<input name="name" placeholder="optional"></label>
+          <label>Use case
+            <select name="usecase">
+              <option value="passive">Passive — no direct contact with the target</option>
+              <option value="footprint">Footprint — map the attack surface</option>
+              <option value="investigate">Investigate — malicious-indicator focus</option>
+              <option value="all">All modules (slow, noisy)</option>
+            </select>
+          </label>
+          <button>Start scan</button>
+        </form>
+        <div class="card">
+          <h3>Scans</h3>
+          <div class="row"><button type="button" id="sf-refresh">Refresh list</button></div>
+          <div id="sf-list" class="scroll"></div>
+        </div>
+      </div>
+      <div id="sf-out" class="output"></div>
+    </section>
+
+    <!-- GRAPH -->
+    <section id="tab-graph" class="panel">
+      <h2>Maltego-style link graph</h2>
+      <form class="card inline" data-action="graph-add">
+        <select name="type">
+          <option value="domain">Domain</option>
+          <option value="ip">IP address</option>
+        </select>
+        <input name="value" placeholder="example.com" required>
+        <button>Add entity</button>
+        <button type="button" class="secondary" id="graph-clear">Clear</button>
+        <button type="button" class="secondary" id="graph-csv">Export CSV (Maltego)</button>
+        <button type="button" class="secondary" id="graph-graphml">Export GraphML</button>
+      </form>
+      <p class="hint">Tap an entity to run transforms on it. Exported CSV opens in Maltego via
+        <em>Import → Import Graph from Table</em>.</p>
+      <div class="graph-wrap">
+        <div id="graph"></div>
+        <aside id="graph-side" class="card">
+          <p class="muted">Select an entity.</p>
+        </aside>
+      </div>
+    </section>
+
+    <!-- AI -->
+    <section id="tab-ai" class="panel">
+      <h2>Qwen AI analyst <span id="ai-model" class="badge"></span></h2>
+      <div id="chat" class="chat"></div>
+      <form id="chat-form" class="chat-form">
+        <textarea name="msg" rows="2" placeholder="Ask anything — e.g. 'Explain these open ports and how to secure them' or 'How do I use nmap in Kali?'"></textarea>
+        <div class="row">
+          <label class="check"><input type="checkbox" name="ctx" checked> Include collected results</label>
+          <button>Send</button>
+          <button type="button" class="secondary" id="chat-clear">New chat</button>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <dialog id="pw-dialog">
+    <form method="dialog" id="pw-form">
+      <h3>App password</h3>
+      <p class="muted">This console is protected. Enter the password set in APP_PASSWORD.</p>
+      <input type="password" name="pw" autocomplete="current-password" required>
+      <button>Unlock</button>
+    </form>
+  </dialog>
+</body>
+</html>

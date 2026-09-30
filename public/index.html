@@ -19,6 +19,7 @@
       <button data-tab="shodan">Shodan</button>
       <button data-tab="spiderfoot">SpiderFoot</button>
       <button data-tab="graph">Maltego Graph</button>
+      <button data-tab="toolkit">Toolkit</button>
       <button data-tab="ai">Ask (Auto)</button>
     </nav>
   </header>
@@ -122,6 +123,22 @@
           <p class="muted">Select an entity.</p>
         </aside>
       </div>
+    </section>
+
+    <!-- TOOLKIT -->
+    <section id="tab-toolkit" class="panel">
+      <h2>Dark web &amp; OSINT toolkit</h2>
+      <div class="notice" id="kit-notice"></div>
+      <p class="hint">These tools run in <b>your own isolated Kali VM</b>, not on this website. This page gives you
+        what each one does, how to install it, and how to check it's safe. Tools marked <span class="tag">in website</span>
+        can also be used directly here.</p>
+      <div class="row kit-filter">
+        <input id="kit-search" placeholder="Filter tools… (e.g. tor, crawler, username)">
+      </div>
+      <div class="row" id="kit-cats"></div>
+      <div id="kit-list"></div>
+      <h2>Best practices</h2>
+      <div class="cards" id="kit-practices"></div>
     </section>
 
     <!-- AI -->

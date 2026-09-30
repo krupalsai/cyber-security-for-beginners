@@ -23,6 +23,7 @@ const QWEN_BASE_URL = (process.env.QWEN_BASE_URL ||
 const QWEN_MODEL = process.env.QWEN_MODEL || 'qwen-plus';
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const CATALOG = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'catalog.json'), 'utf8'));
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -411,7 +412,22 @@ const lookups = {
 // ---------------------------------------------------------------- Tool registry for auto-selection
 // Every tool here is read-only or passive. `enabled` hides tools whose service isn't configured.
 
+function findCatalogTools(text) {
+  const t = String(text || '').toLowerCase();
+  const word = (w) => new RegExp(`(^|[^a-z0-9])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^a-z0-9])`).test(t);
+  return CATALOG.tools.filter((x) => x.id !== 'vm' && (word(x.id) || word(x.name.toLowerCase())));
+}
+
 const TOOLS = [
+  {
+    name: 'kali_tool_info', service: 'Toolkit', enabled: () => true,
+    description: 'Get the toolkit entry (purpose, install and safe usage commands, safety notes) for a Kali/OSINT tool such as Tor, Proxychains, TorBot, DarkDump, OnionSearch, Robin, Katana, Maltego, theHarvester, Maigret or Colly. Use it for questions about how to set up or use these tools, and for dark web research safety.',
+    params: { name: 'Tool name' },
+    run: (a) => {
+      const hits = findCatalogTools(a.name);
+      return { tools: hits.length ? hits : CATALOG.tools.map((x) => x.name), bestPractices: CATALOG.bestPractices, notice: CATALOG.notice };
+    },
+  },
   {
     name: 'dns_lookup', service: 'DNS', enabled: () => true,
     description: 'Get A, AAAA, MX, NS and TXT records for a domain.',
@@ -567,6 +583,11 @@ function planWithoutLlm(question) {
     if (m) add('shodan_count', { query: m[1] });
   }
   if (!plan.length && /spiderfoot|scans?/.test(q)) add('spiderfoot_list_scans', {});
+  for (const t of findCatalogTools(q).slice(0, 3)) {
+    if (t.id === 'shodan' && plan.length) continue;
+    plan.push({ name: 'kali_tool_info', args: { name: t.name } });
+  }
+  if (!plan.length && /dark ?web|onion|\btor\b/.test(q)) plan.push({ name: 'kali_tool_info', args: { name: 'tor proxychains' } });
   return plan;
 }
 
@@ -576,7 +597,9 @@ You can call tools. Decide from the user's question which tools are relevant, ca
 when independent), then answer using their results. Prefer free passive tools (DNS, RDAP, crt.sh, NVD)
 before Shodan. Do not call tools that are not needed. After the tool results, give a clear answer with
 the key findings, the security risks, and recommended next steps, including which Kali Linux tools the
-user could use next (for assets they are authorised to test).`;
+user could use next (for assets they are authorised to test).
+For dark web research questions: explain the safe setup first (isolated VM, Tor, proxychains, verification),
+use kali_tool_info for tool details, and never help locate or access illegal content or services.`;
 
 async function agent(b) {
   const question = requireText(b.question, 'Question', 4000);
@@ -646,6 +669,7 @@ const routes = {
   'POST /api/graph/transform': runTransform,
   'POST /api/agent': agent,
   'POST /api/tools': listTools,
+  'POST /api/catalog': () => CATALOG,
   'POST /api/lookup/rdap': lookups.rdap,
   'POST /api/lookup/crtsh': lookups.crtsh,
   'POST /api/lookup/cve': lookups.cve,

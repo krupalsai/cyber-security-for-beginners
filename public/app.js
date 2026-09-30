@@ -115,6 +115,7 @@ function switchTab(name) {
   $$('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
   $$('.panel').forEach((p) => p.classList.toggle('active', p.id === `tab-${name}`));
   if (name === 'graph') graph.ensure();
+  if (name === 'toolkit') loadKit();
   try { localStorage.setItem('osint-tab', name); } catch { /* ignore */ }
 }
 $$('.tabs button').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
@@ -466,6 +467,81 @@ const graphActions = {
     return null;
   },
 };
+
+// ------------------------------------------------------------ Toolkit
+
+const kit = { data: null, cat: '' };
+
+async function loadKit() {
+  if (kit.data) return;
+  try {
+    kit.data = await api('catalog');
+  } catch (e) {
+    $('#kit-list').innerHTML = `<p class="error">${esc(e.message)}</p>`;
+    return;
+  }
+  const d = kit.data;
+  $('#kit-notice').innerHTML = `<strong>Legitimate, defensive use only.</strong> ${esc(d.notice)}`;
+  $('#kit-cats').innerHTML = [['', 'All'], ...Object.entries(d.categories).map(([k, v]) => [k, v.split(' (')[0]])]
+    .map(([k, v]) => `<button class="small secondary ${k === kit.cat ? 'active' : ''}" data-cat="${esc(k)}">${esc(v)}</button>`).join('');
+  $('#kit-practices').innerHTML = d.bestPractices.map((b) => `<div class="card"><h3>${esc(b.title)}</h3><p class="muted">${esc(b.text)}</p></div>`).join('');
+  renderKit();
+}
+
+function cmdBlock(lines) {
+  return lines.map((l) => `<div class="cmd"><pre>${esc(l)}</pre><button class="small secondary" data-copy="${esc(l)}">Copy</button></div>`).join('');
+}
+
+function renderKit() {
+  const d = kit.data;
+  const q = $('#kit-search').value.trim().toLowerCase();
+  const match = (t) => (!kit.cat || t.category === kit.cat) &&
+    (!q || `${t.name} ${t.summary} ${t.category}`.toLowerCase().includes(q));
+  const html = Object.entries(d.categories).map(([cat, title]) => {
+    const tools = d.tools.filter((t) => t.category === cat && match(t));
+    if (!tools.length) return '';
+    return `<h3 class="kit-section">${esc(title)}</h3><div class="kit-grid">${tools.map((t) => `
+      <div class="card kit-card">
+        <h3>${esc(t.name)}
+          ${t.kali ? '<span class="tag">Kali package</span>' : '<span class="tag">GitHub install</span>'}
+          ${t.web ? `<button class="small" data-open="${esc(t.web)}">in website ↗</button>` : ''}</h3>
+        <p>${esc(t.summary)}</p>
+        ${t.install.length ? `<p class="sub">Install</p>${cmdBlock(t.install)}` : ''}
+        ${t.usage.length ? `<p class="sub">Use / verify</p>${cmdBlock(t.usage)}` : ''}
+        <div class="row" style="margin-top:.5rem">
+          <a href="${esc(t.url)}" target="_blank" rel="noopener noreferrer">Official page</a>
+          <button class="small secondary" data-ask="${esc(t.name)}">Ask AI about it</button>
+        </div>
+      </div>`).join('')}</div>`;
+  }).join('');
+  $('#kit-list').innerHTML = html || '<p class="muted">No tools match.</p>';
+}
+
+$('#kit-search').addEventListener('input', () => kit.data && renderKit());
+$('#kit-cats').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-cat]');
+  if (!b) return;
+  kit.cat = b.dataset.cat;
+  $$('#kit-cats button').forEach((x) => x.classList.toggle('active', x === b));
+  renderKit();
+});
+$('#tab-toolkit').addEventListener('click', async (e) => {
+  const copy = e.target.closest('button[data-copy]');
+  if (copy) {
+    try { await navigator.clipboard.writeText(copy.dataset.copy); copy.textContent = 'Copied'; } catch { copy.textContent = 'Select & copy'; }
+    setTimeout(() => { copy.textContent = 'Copy'; }, 1500);
+  }
+  const open = e.target.closest('button[data-open]');
+  if (open) switchTab(open.dataset.open);
+  const ask = e.target.closest('button[data-ask]');
+  if (ask) {
+    switchTab('ai');
+    const f = $('#chat-form');
+    f.msg.value = `How do I set up and safely use ${ask.dataset.ask} in an isolated Kali VM?`;
+    f.auto.checked = true;
+    f.msg.focus();
+  }
+});
 
 // ------------------------------------------------------------ Qwen AI chat
 

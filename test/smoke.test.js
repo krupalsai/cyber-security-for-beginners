@@ -80,6 +80,19 @@ async function main() {
       const tools = await (await post('tools', {})).json();
       assert.ok(tools.find((t) => t.name === 'shodan_host' && t.enabled === false));
     },
+    'router matches toolkit tools by whole word': async () => {
+      const names = (q) => planWithoutLlm(q).map((p) => p.args.name);
+      assert.deepStrictEqual(names('how do I install torbot and proxychains').sort(), ['Proxychains', 'TorBot']);
+      assert.deepStrictEqual(names('what is the history of monitor'), []);
+      assert.deepStrictEqual(names('dark web research safety'), ['tor proxychains']);
+    },
+    'catalog endpoint': async () => {
+      const c = await (await post('catalog', {})).json();
+      for (const id of ['tor', 'proxychains', 'torbot', 'darkdump', 'onionsearch', 'robin', 'katana', 'maltego', 'theharvester', 'maigret', 'colly']) {
+        assert.ok(c.tools.find((t) => t.id === id), id);
+      }
+      assert.ok(c.bestPractices.length >= 4);
+    },
     'invalid JSON rejected': async () => {
       const r = await fetch(`${base}/api/graph/transform`, {
         method: 'POST', headers: { 'X-App-Password': 'test-pw' }, body: '{',

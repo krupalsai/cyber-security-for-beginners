@@ -11,7 +11,12 @@ or any computer, with no laptop or Kali install needed.
 | **Ask (Auto)** | Type a question in plain words; the right tools are **selected automatically** and run, then Qwen writes the analysis. Every tool call is shown and can be expanded | `QWEN_API_KEY` for AI planning; works without it using a keyword router |
 | **Extra lookups** | WHOIS/RDAP (domain & IP owner), certificate-transparency subdomains (crt.sh), CVE details & CVSS (NIST NVD), DNS & reverse DNS. Also available as graph transforms | Nothing, all free |
 
+| **Toolkit** | Dark web & OSINT tool guide: Tor, Proxychains, isolated VM, TorBot, DarkDump, OnionSearch, Robin, Katana, Maltego, theHarvester, Maigret, Colly. Each has its purpose, copyable install/verify commands and official link, plus best practices. Auto mode answers questions about them | Nothing |
+
 > **Legal:** only investigate targets you own or have written permission to test.
+> The Toolkit tools run in **your own isolated Kali VM**. The website deliberately does not connect to Tor
+> or crawl `.onion` sites itself: a public server doing that could fetch illegal content, break the hosting
+> provider's terms, and skip the VM isolation that safe dark web research needs.
 
 ## How auto tool selection works
 
@@ -79,6 +84,7 @@ API keys stay on the server; the browser never sees them.
 
 ```
 server.js          Node HTTP server + API proxy (Shodan, SpiderFoot, Qwen, graph transforms)
+data/catalog.json  Toolkit entries and best practices (edit to add tools)
 public/            Front end (index.html, app.js, style.css, vendored vis-network/marked/DOMPurify)
 test/smoke.test.js Routing, auth and validation tests
 Dockerfile, render.yaml  Deployment

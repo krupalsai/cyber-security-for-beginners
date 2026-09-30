@@ -1,0 +1,115 @@
+{
+  "notice": "These tools are for legitimate, defensive cybersecurity work only: authorised threat intelligence, digital forensics, OSINT research and penetration tests you have written permission for. Accessing, scraping or interacting with dark web services can expose you to illegal content and legal risk. Know the law where you live and follow your organisation's rules.",
+  "categories": {
+    "prereq": "Prerequisites for safe dark web research",
+    "darkweb": "Dedicated dark web OSINT & search tools",
+    "general": "General OSINT & crawling tools (adaptable for the dark web)",
+    "web": "Built into this website"
+  },
+  "bestPractices": [
+    { "title": "Anonymity", "text": "Never use personal credentials, real names or primary e-mail addresses when configuring or using these tools. Use research-only identities." },
+    { "title": "Network security", "text": "Before any connection, verify your tools are really going through Tor (proxychains4 -q curl https://check.torproject.org/api/ip should say \"IsTor\": true) to prevent IP leaks." },
+    { "title": "Browser hardening", "text": "For manual verification use Tor Browser with the security level set to \"Safest\", which disables JavaScript and reduces exploit risk." },
+    { "title": "Data handling", "text": "Treat every downloaded file or page as potentially malicious. Analyse it in an isolated, offline sandbox, never on your normal machine." },
+    { "title": "Isolation", "text": "Work in a disposable, non-persistent virtual machine (e.g. Kali or Whonix in VirtualBox with snapshots) and revert it after each session." },
+    { "title": "Stop and report", "text": "If you encounter child sexual abuse material or evidence of imminent harm, stop immediately, do not download or share it, and report it to the authorities (e.g. NCMEC CyberTipline, IWF, or your national cybercrime portal)." }
+  ],
+  "tools": [
+    {
+      "id": "tor", "name": "Tor", "category": "prereq", "kali": true,
+      "summary": "The anonymity network required to reach .onion hidden services. Runs a local SOCKS5 proxy on 127.0.0.1:9050.",
+      "install": ["sudo apt update && sudo apt install -y tor", "sudo systemctl start tor", "sudo systemctl status tor"],
+      "usage": ["curl --socks5-hostname 127.0.0.1:9050 https://check.torproject.org/api/ip"],
+      "url": "https://www.torproject.org"
+    },
+    {
+      "id": "proxychains", "name": "Proxychains", "category": "prereq", "kali": true,
+      "summary": "Kali utility that forces the traffic of other command-line tools through a proxy such as Tor.",
+      "install": ["sudo apt install -y proxychains4", "# In /etc/proxychains4.conf keep 'proxy_dns' and set the last line to:  socks5 127.0.0.1 9050"],
+      "usage": ["proxychains4 -q curl https://check.torproject.org/api/ip", "proxychains4 -q <tool> <args>"],
+      "url": "https://github.com/rofl0r/proxychains-ng"
+    },
+    {
+      "id": "vm", "name": "Isolated virtual machine", "category": "prereq", "kali": true,
+      "summary": "Always do dark web research inside a disposable, non-persistent VM (Kali or Whonix in VirtualBox/VMware) so a malicious page or file cannot compromise your real system.",
+      "install": ["Download the Kali VirtualBox image from kali.org/get-kali", "Take a clean snapshot before each session and revert to it afterwards"],
+      "usage": [],
+      "url": "https://www.kali.org/get-kali/#kali-virtual-machines"
+    },
+    {
+      "id": "torbot", "name": "TorBot", "category": "darkweb", "kali": false,
+      "summary": "Python OSINT tool that crawls .onion sites, extracts metadata and maps links between hidden services.",
+      "install": ["git clone https://github.com/DedSecInside/TorBot.git", "cd TorBot && pip install -r requirements.txt"],
+      "usage": ["python main.py --help"],
+      "url": "https://github.com/DedSecInside/TorBot"
+    },
+    {
+      "id": "darkdump", "name": "DarkDump", "category": "darkweb", "kali": false,
+      "summary": "Queries several dark web search engines, can optionally scrape each result for metadata, and filters results against Ahmia's abuse blacklist. Has CLI and local web interfaces.",
+      "install": ["git clone https://github.com/josh0xA/darkdump.git", "cd darkdump && pip install -r requirements.txt"],
+      "usage": ["darkdump-cli --help", "darkdump-cli -q \"your company name\" -a 10   # Ahmia, filtered, no Tor needed"],
+      "url": "https://github.com/josh0xA/darkdump"
+    },
+    {
+      "id": "onionsearch", "name": "OnionSearch", "category": "darkweb", "kali": false,
+      "summary": "Searches many dark web search engines at once to discover .onion links for a keyword.",
+      "install": ["pip3 install onionsearch"],
+      "usage": ["onionsearch --help"],
+      "url": "https://github.com/megadose/OnionSearch"
+    },
+    {
+      "id": "robin", "name": "Robin", "category": "darkweb", "kali": false,
+      "summary": "AI-powered dark web OSINT: uses an LLM to refine queries, filter search-engine results and write an investigation summary. Needs Tor; runs via Docker, Python or a release binary, with cloud or local (Ollama) models.",
+      "install": ["sudo apt install -y tor docker.io", "git clone https://github.com/apurvsinghgautam/robin.git", "cd robin && cp .env.example .env   # add your model API key", "docker build -t robin ."],
+      "usage": ["See the README for model and query flags"],
+      "url": "https://github.com/apurvsinghgautam/robin"
+    },
+    {
+      "id": "katana", "name": "Katana", "category": "general", "kali": true,
+      "summary": "Fast crawler by ProjectDiscovery for discovering endpoints and links. Can be pointed through Tor's SOCKS proxy.",
+      "install": ["sudo apt install -y katana"],
+      "usage": ["katana -u https://your-site.example -d 2", "katana -u https://your-site.example -proxy socks5://127.0.0.1:9050"],
+      "url": "https://github.com/projectdiscovery/katana"
+    },
+    {
+      "id": "maltego", "name": "Maltego", "category": "general", "kali": true, "web": "graph",
+      "summary": "Graph-based link analysis for mapping entities (domains, IPs, people, organisations). Extensible with custom transforms. This website's Maltego Graph tab gives you the same workflow in the browser and exports CSV for Maltego.",
+      "install": ["sudo apt install -y maltego"],
+      "usage": ["Import → Import Graph from Table → choose the CSV exported from this website"],
+      "url": "https://www.maltego.com"
+    },
+    {
+      "id": "theharvester", "name": "theHarvester", "category": "general", "kali": true,
+      "summary": "Gathers subdomains, hosts, e-mails and IPs for a domain from public sources. This website's auto mode covers similar ground with DNS, crt.sh and Shodan.",
+      "install": ["sudo apt install -y theharvester"],
+      "usage": ["theHarvester -d your-domain.example -b crtsh,dnsdumpster"],
+      "url": "https://github.com/laramies/theHarvester"
+    },
+    {
+      "id": "maigret", "name": "Maigret", "category": "general", "kali": true,
+      "summary": "Checks where a username is registered across thousands of sites. Use only for your own accounts, with the person's consent, or within an authorised investigation.",
+      "install": ["pipx install maigret"],
+      "usage": ["maigret --help"],
+      "url": "https://github.com/soxoj/maigret"
+    },
+    {
+      "id": "colly", "name": "Colly", "category": "general", "kali": false,
+      "summary": "Go library for writing your own crawlers and scrapers (not a packaged Kali tool). Researchers pair it with Tor/proxychains to collect structured data from sites they're authorised to crawl.",
+      "install": ["sudo apt install -y golang", "go get github.com/gocolly/colly/v2"],
+      "usage": ["See the examples at go-colly.org/docs"],
+      "url": "https://github.com/gocolly/colly"
+    },
+    {
+      "id": "shodan", "name": "Shodan", "category": "web", "kali": true, "web": "shodan",
+      "summary": "Search engine for internet-connected devices and exposed services. Available in this website's Shodan tab and in auto mode.",
+      "install": ["pip install shodan && shodan init <API_KEY>"], "usage": ["shodan host 8.8.8.8"],
+      "url": "https://www.shodan.io"
+    },
+    {
+      "id": "spiderfoot", "name": "SpiderFoot", "category": "web", "kali": true, "web": "spiderfoot",
+      "summary": "Automated OSINT with 200+ modules. This website drives your self-hosted SpiderFoot server.",
+      "install": ["sudo apt install -y spiderfoot"], "usage": ["spiderfoot -l 127.0.0.1:5001"],
+      "url": "https://github.com/smicallef/spiderfoot"
+    }
+  ]
+}

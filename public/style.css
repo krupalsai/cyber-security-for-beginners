@@ -139,3 +139,14 @@ dialog input { margin-bottom: .75rem; }
 .tool-row { display: grid; grid-template-columns: 1fr auto; gap: .1rem 1rem; padding: .4rem 0; border-bottom: 1px solid var(--border); }
 .tool-row:last-child { border-bottom: 0; }
 .tool-row code { font-weight: 600; }
+
+.kit-filter input { flex: 1 1 240px; margin: 0 0 .5rem; }
+#kit-cats { margin-bottom: .75rem; }
+#kit-cats button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.kit-section { margin: 1rem 0 .5rem; font-size: 1.05rem; }
+.kit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: .75rem; }
+.kit-card h3 { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.cmd { position: relative; }
+.cmd pre { margin: .3rem 0; padding-right: 3.8rem; }
+.cmd button { position: absolute; top: .3rem; right: .3rem; }
+.kit-card .sub { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: .6rem 0 0; }

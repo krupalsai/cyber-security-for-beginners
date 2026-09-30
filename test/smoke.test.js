@@ -8,7 +8,15 @@ process.env.SHODAN_API_KEY = '';
 process.env.QWEN_API_KEY = '';
 process.env.SPIDERFOOT_URL = '';
 
-const { server, planWithoutLlm, toolSchemas } = require('../server');
+const crypto = require('crypto');
+const { server, planWithoutLlm, toolSchemas, verifyTelegramInitData } = require('../server');
+
+function signInitData(fields, token) {
+  const check = Object.entries(fields).map(([k, v]) => `${k}=${v}`).sort().join('\n');
+  const secret = crypto.createHmac('sha256', 'WebAppData').update(token).digest();
+  const hash = crypto.createHmac('sha256', secret).update(check).digest('hex');
+  return new URLSearchParams({ ...fields, hash }).toString();
+}
 
 async function main() {
   await new Promise((r) => server.listen(0, r));
@@ -92,6 +100,19 @@ async function main() {
         assert.ok(c.tools.find((t) => t.id === id), id);
       }
       assert.ok(c.bestPractices.length >= 4);
+    },
+    'Telegram initData validation': async () => {
+      const token = '123456:TEST-token';
+      const now = Date.now();
+      const fields = { auth_date: String(Math.floor(now / 1000)), query_id: 'AAE', user: JSON.stringify({ id: 42, first_name: 'K' }) };
+      const good = signInitData(fields, token);
+      assert.strictEqual(verifyTelegramInitData(good, token, now).id, 42);
+      assert.strictEqual(verifyTelegramInitData(good, 'other:token', now), null, 'wrong bot token');
+      const tampered = good.replace('%22id%22%3A42', '%22id%22%3A43');
+      assert.notStrictEqual(tampered, good);
+      assert.strictEqual(verifyTelegramInitData(tampered, token, now), null, 'tampered');
+      assert.strictEqual(verifyTelegramInitData(good, token, now + 2 * 86400e3), null, 'expired');
+      assert.strictEqual(verifyTelegramInitData('hash=zz', token, now), null, 'garbage');
     },
     'invalid JSON rejected': async () => {
       const r = await fetch(`${base}/api/graph/transform`, {

@@ -150,3 +150,14 @@ dialog input { margin-bottom: .75rem; }
 .cmd pre { margin: .3rem 0; padding-right: 3.8rem; }
 .cmd button { position: absolute; top: .3rem; right: .3rem; }
 .kit-card .sub { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: .6rem 0 0; }
+
+/* Telegram Mini App: follow the Telegram client's theme colours */
+:root.tg {
+  --bg: var(--tg-theme-secondary-bg-color, var(--tg-theme-bg-color));
+  --panel: var(--tg-theme-bg-color);
+  --text: var(--tg-theme-text-color);
+  --muted: var(--tg-theme-hint-color);
+  --accent: var(--tg-theme-button-color);
+  --accent-text: var(--tg-theme-button-text-color);
+  --code: var(--tg-theme-secondary-bg-color);
+}

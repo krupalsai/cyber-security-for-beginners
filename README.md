@@ -62,6 +62,23 @@ All of these work from a phone browser:
 
 **Always set `APP_PASSWORD`** when it's public, so strangers can't spend your Shodan/Qwen credits.
 
+## Telegram Mini App
+
+The same site can open inside Telegram from a bot's menu button.
+
+1. In Telegram, message **@BotFather** → `/newbot` → pick a name → copy the **bot token**.
+2. Message **@userinfobot** to get your numeric **user ID**.
+3. On your host (e.g. Render), set:
+   - `TELEGRAM_BOT_TOKEN` = the bot token
+   - `TELEGRAM_ALLOWED_USERS` = your user ID (comma-separate several)
+   - `PUBLIC_URL` = your site's `https://` address
+4. Redeploy. On startup the server sets the bot's menu button to **Open console**.
+   (Or do it by hand in BotFather: `/mybots` → your bot → *Bot Settings* → *Menu Button*.)
+5. Open your bot in Telegram and tap **Open console**.
+
+Inside Telegram there's no password prompt: the server checks Telegram's signed login data and only
+lets in the user IDs in `TELEGRAM_ALLOWED_USERS`. Opening the site in a normal browser still uses `APP_PASSWORD`.
+
 ## 3. Run locally (optional)
 
 Requires Node.js 18+; there's nothing to `npm install`.
@@ -74,7 +91,8 @@ npm test               # smoke tests
 
 ## Configuration
 
-See [`.env.example`](.env.example) for every variable: `APP_PASSWORD`, `SHODAN_API_KEY`,
+See [`.env.example`](.env.example) for every variable: `APP_PASSWORD`, `TELEGRAM_BOT_TOKEN`,
+`TELEGRAM_ALLOWED_USERS`, `PUBLIC_URL`, `SHODAN_API_KEY`,
 `QWEN_API_KEY`, `QWEN_MODEL`, `QWEN_BASE_URL`, `SPIDERFOOT_URL`, `SPIDERFOOT_USER`,
 `SPIDERFOOT_PASS`, `PORT`.
 

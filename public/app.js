@@ -26,6 +26,18 @@ function setPassword(pw) {
 }
 let sessionPw = getPassword();
 
+// Telegram Mini App: when opened inside Telegram, authenticate with the signed initData.
+const tg = window.Telegram?.WebApp;
+const tgInitData = tg?.initData || '';
+if (tgInitData) {
+  tg.ready();
+  tg.expand();
+  document.documentElement.classList.add('tg');
+  const theme = () => document.documentElement.setAttribute('data-theme', tg.colorScheme === 'dark' ? 'dark' : 'light');
+  theme();
+  tg.onEvent('themeChanged', theme);
+}
+
 function askPassword() {
   return new Promise((resolve) => {
     const dlg = $('#pw-dialog');
@@ -39,7 +51,11 @@ function askPassword() {
 async function api(route, body = {}, retry = true) {
   const r = await fetch(`/api/${route}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-App-Password': sessionPw },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-App-Password': sessionPw,
+      ...(tgInitData && { 'X-Telegram-Init-Data': tgInitData }),
+    },
     body: JSON.stringify(body),
   });
   const data = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
@@ -137,7 +153,7 @@ async function loadConfig() {
       <p class="status ${on ? 'on' : 'off'}">${on ? '● Ready' : `○ Not configured — set ${esc(env)}`}</p>
       <p class="muted">${esc(desc)}</p></div>`).join('');
   $('#ai-model').textContent = c.qwen ? c.qwenModel : 'rule-based (no Qwen key)';
-  if (c.authRequired && !sessionPw) await askPassword();
+  if (c.authRequired && !sessionPw && !tgInitData) await askPassword();
   loadTools();
 }
 

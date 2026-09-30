@@ -13,6 +13,10 @@ loadDotEnv(path.join(__dirname, '.env'));
 
 const PORT = Number(process.env.PORT) || 3000;
 const APP_PASSWORD = process.env.APP_PASSWORD || '';
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const TELEGRAM_ALLOWED_USERS = new Set((process.env.TELEGRAM_ALLOWED_USERS || '')
+  .split(/[\s,]+/).filter(Boolean));
+const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/+$/, '');
 const SHODAN_API_KEY = process.env.SHODAN_API_KEY || '';
 const SPIDERFOOT_URL = (process.env.SPIDERFOOT_URL || '').replace(/\/+$/, '');
 const SPIDERFOOT_USER = process.env.SPIDERFOOT_USER || '';
@@ -649,6 +653,53 @@ function listTools() {
   return TOOLS.map((t) => ({ name: t.name, service: t.service, description: t.description, enabled: t.enabled() }));
 }
 
+// ---------------------------------------------------------------- Telegram Mini App auth
+// https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
+
+const TELEGRAM_MAX_AGE_S = 24 * 60 * 60;
+
+function verifyTelegramInitData(initData, botToken = TELEGRAM_BOT_TOKEN, now = Date.now()) {
+  if (!initData || !botToken) return null;
+  const params = new URLSearchParams(initData);
+  const hash = params.get('hash');
+  if (!hash || !/^[0-9a-f]{64}$/.test(hash)) return null;
+  params.delete('hash');
+  const checkString = [...params.entries()]
+    .map(([k, v]) => `${k}=${v}`).sort().join('\n');
+  const secret = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+  const expected = crypto.createHmac('sha256', secret).update(checkString).digest();
+  if (!crypto.timingSafeEqual(expected, Buffer.from(hash, 'hex'))) return null;
+  const authDate = Number(params.get('auth_date'));
+  if (!authDate || now / 1000 - authDate > TELEGRAM_MAX_AGE_S) return null;
+  try {
+    return JSON.parse(params.get('user') || 'null');
+  } catch {
+    return null;
+  }
+}
+
+function isAuthorized(req) {
+  if (!APP_PASSWORD && !TELEGRAM_BOT_TOKEN) return true;
+  if (APP_PASSWORD && safeEqual(req.headers['x-app-password'] || '', APP_PASSWORD)) return true;
+  const user = verifyTelegramInitData(req.headers['x-telegram-init-data']);
+  return Boolean(user && TELEGRAM_ALLOWED_USERS.has(String(user.id)));
+}
+
+// Point the bot's menu button at this site so it opens as a Mini App.
+async function setupTelegramMenuButton() {
+  if (!TELEGRAM_BOT_TOKEN || !PUBLIC_URL.startsWith('https://')) return;
+  try {
+    const r = await fetchJson(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setChatMenuButton`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ menu_button: { type: 'web_app', text: 'Open console', web_app: { url: PUBLIC_URL } } }),
+    }, 'Telegram');
+    console.log(`  Telegram menu button -> ${PUBLIC_URL}: ${r?.ok ? 'set' : 'failed'}`);
+  } catch (e) {
+    console.log(`  Telegram menu button not set: ${e.message}`);
+  }
+}
+
 // ---------------------------------------------------------------- routing
 
 const routes = {
@@ -695,7 +746,8 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && pathname === '/api/config') {
     return sendJson(res, 200, {
-      authRequired: Boolean(APP_PASSWORD),
+      authRequired: Boolean(APP_PASSWORD || TELEGRAM_BOT_TOKEN),
+      telegram: Boolean(TELEGRAM_BOT_TOKEN),
       shodan: Boolean(SHODAN_API_KEY),
       spiderfoot: Boolean(SPIDERFOOT_URL),
       qwen: Boolean(QWEN_API_KEY),
@@ -711,8 +763,8 @@ const server = http.createServer(async (req, res) => {
   const handler = routes[`${req.method} ${pathname}`];
   if (!handler) return sendJson(res, 404, { error: 'Unknown API route' });
 
-  if (APP_PASSWORD && !safeEqual(req.headers['x-app-password'] || '', APP_PASSWORD)) {
-    return sendJson(res, 401, { error: 'Wrong or missing app password' });
+  if (!isAuthorized(req)) {
+    return sendJson(res, 401, { error: 'Not authorised: wrong password, or this Telegram account is not allowed' });
   }
 
   try {
@@ -729,8 +781,13 @@ if (require.main === module) {
   server.listen(PORT, () => {
     console.log(`OSINT Web Console on http://localhost:${PORT}`);
     console.log(`  Shodan: ${SHODAN_API_KEY ? 'on' : 'off'} | SpiderFoot: ${SPIDERFOOT_URL || 'off'} | ` +
-      `Qwen: ${QWEN_API_KEY ? QWEN_MODEL : 'off'} | Password: ${APP_PASSWORD ? 'on' : 'OFF'}`);
+      `Qwen: ${QWEN_API_KEY ? QWEN_MODEL : 'off'} | Password: ${APP_PASSWORD ? 'on' : 'OFF'} | ` +
+      `Telegram: ${TELEGRAM_BOT_TOKEN ? `${TELEGRAM_ALLOWED_USERS.size} allowed user(s)` : 'off'}`);
+    if (TELEGRAM_BOT_TOKEN && !TELEGRAM_ALLOWED_USERS.size) {
+      console.warn('  Warning: TELEGRAM_ALLOWED_USERS is empty, so no Telegram user can use the API.');
+    }
+    setupTelegramMenuButton();
   });
 }
 
-module.exports = { server, planWithoutLlm, toolSchemas };
+module.exports = { server, planWithoutLlm, toolSchemas, verifyTelegramInitData };

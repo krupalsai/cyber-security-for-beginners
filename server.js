@@ -293,6 +293,31 @@ const transforms = {
       type: 'domain', value: s ? `${s}.${d}` : d, label: 'subdomain',
     }));
   },
+  'domain.crtsh': async (value) => (await lookups.crtsh({ domain: value })).subdomains
+    .slice(0, 150).map((v) => ({ type: 'domain', value: v, label: 'cert' })),
+  'domain.whois': async (value) => {
+    const r = await lookups.rdap({ query: value });
+    return [
+      ...r.entities.filter((e) => e.name).map((e) => ({ type: 'org', value: e.name, label: (e.roles || []).join('/') || 'entity' })),
+      ...r.events.map((e) => ({ type: 'phrase', value: `${e.action}: ${String(e.date).slice(0, 10)}`, label: 'whois' })),
+    ];
+  },
+  'ip.whois': async (value) => {
+    const r = await lookups.rdap({ query: requireIp(value) });
+    return [
+      r.name && { type: 'org', value: r.name, label: 'network' },
+      r.range && { type: 'phrase', value: r.range, label: 'range' },
+      r.country && { type: 'location', value: r.country, label: 'country' },
+      ...r.entities.filter((e) => e.name).map((e) => ({ type: 'org', value: e.name, label: (e.roles || []).join('/') || 'entity' })),
+    ].filter(Boolean);
+  },
+  'vuln.cve': async (value) => {
+    const r = await lookups.cve({ id: value });
+    return [
+      r.cvss && { type: 'phrase', value: `CVSS ${r.cvss.score} ${r.cvss.severity}`, label: 'score' },
+      ...r.weaknesses.map((w) => ({ type: 'phrase', value: w, label: 'CWE' })),
+    ].filter(Boolean);
+  },
   'ip.reverse': async (value) => {
     const names = await settle(dns.reverse(requireIp(value)));
     return names.map((n) => ({ type: 'domain', value: n, label: 'PTR' }));
@@ -321,6 +346,286 @@ async function runTransform(b) {
   return { entities };
 }
 
+// ---------------------------------------------------------------- Free passive lookups (no API key)
+
+const CVE_RE = /^CVE-\d{4}-\d{4,7}$/i;
+
+const lookups = {
+  // Registration data (modern WHOIS) via the RDAP bootstrap redirector.
+  rdap: async (b) => {
+    const q = String(b.query || '').trim();
+    const kind = net.isIP(q) ? 'ip' : 'domain';
+    const target = kind === 'ip' ? q : requireDomain(q);
+    const r = await fetchJson(`https://rdap.org/${kind}/${encodeURIComponent(target)}`,
+      { headers: { Accept: 'application/rdap+json' } }, 'RDAP');
+    const vcardName = (e) => (e.vcardArray?.[1] || []).find((f) => f[0] === 'fn')?.[3];
+    return {
+      query: target,
+      name: r.ldhName || r.name,
+      handle: r.handle,
+      status: r.status,
+      range: r.startAddress ? `${r.startAddress} - ${r.endAddress}` : undefined,
+      country: r.country,
+      events: (r.events || []).map((e) => ({ action: e.eventAction, date: e.eventDate })),
+      nameservers: (r.nameservers || []).map((n) => n.ldhName),
+      entities: (r.entities || []).map((e) => ({ roles: e.roles, name: vcardName(e) || e.handle })),
+    };
+  },
+  // Certificate Transparency logs: every hostname that has had a public TLS certificate.
+  crtsh: async (b) => {
+    const d = requireDomain(b.domain);
+    const rows = await fetchJson(`https://crt.sh/?q=${encodeURIComponent('%.' + d)}&output=json`,
+      { timeout: 60000 }, 'crt.sh');
+    const names = new Set();
+    for (const r of rows || []) {
+      for (const n of String(r.name_value || '').split('\n')) {
+        const h = n.trim().toLowerCase().replace(/^\*\./, '');
+        if (h === d || h.endsWith('.' + d)) names.add(h);
+      }
+    }
+    return { domain: d, certificates: (rows || []).length, subdomains: [...names].sort().slice(0, 500) };
+  },
+  // Vulnerability details from the NIST National Vulnerability Database.
+  cve: async (b) => {
+    const id = String(b.id || '').trim().toUpperCase();
+    if (!CVE_RE.test(id)) throw new HttpError(400, 'Enter a CVE id like CVE-2021-44228');
+    const r = await fetchJson(`https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=${id}`, {}, 'NVD');
+    const c = r.vulnerabilities?.[0]?.cve;
+    if (!c) throw new HttpError(404, `${id} not found in NVD`);
+    const m = c.metrics || {};
+    const cvss = (m.cvssMetricV31 || m.cvssMetricV30 || m.cvssMetricV2 || [])[0]?.cvssData;
+    return {
+      id: c.id,
+      published: c.published,
+      status: c.vulnStatus,
+      description: c.descriptions?.find((d) => d.lang === 'en')?.value,
+      cvss: cvss && { score: cvss.baseScore, severity: cvss.baseSeverity, vector: cvss.vectorString },
+      weaknesses: (c.weaknesses || []).flatMap((w) => w.description.map((d) => d.value)),
+      references: (c.references || []).slice(0, 10).map((x) => x.url),
+    };
+  },
+  dns: async (b) => ({ domain: requireDomain(b.domain), records: await transforms['domain.dns'](b.domain) }),
+  reverseDns: async (b) => ({ ip: requireIp(b.ip), names: await settle(dns.reverse(requireIp(b.ip))) }),
+};
+
+// ---------------------------------------------------------------- Tool registry for auto-selection
+// Every tool here is read-only or passive. `enabled` hides tools whose service isn't configured.
+
+const TOOLS = [
+  {
+    name: 'dns_lookup', service: 'DNS', enabled: () => true,
+    description: 'Get A, AAAA, MX, NS and TXT records for a domain.',
+    params: { domain: 'Domain name, e.g. example.com' },
+    run: (a) => lookups.dns(a),
+  },
+  {
+    name: 'reverse_dns', service: 'DNS', enabled: () => true,
+    description: 'Find hostnames (PTR records) for an IP address.',
+    params: { ip: 'IPv4 or IPv6 address' },
+    run: (a) => lookups.reverseDns(a),
+  },
+  {
+    name: 'whois_rdap', service: 'RDAP/WHOIS', enabled: () => true,
+    description: 'Registration data for a domain (registrar, dates, nameservers) or an IP (owner network, range, country).',
+    params: { query: 'Domain name or IP address' },
+    run: (a) => lookups.rdap(a),
+  },
+  {
+    name: 'cert_transparency_subdomains', service: 'crt.sh', enabled: () => true,
+    description: 'List subdomains of a domain found in public TLS certificate transparency logs.',
+    params: { domain: 'Domain name' },
+    run: (a) => lookups.crtsh(a),
+  },
+  {
+    name: 'cve_details', service: 'NVD', enabled: () => true,
+    description: 'Look up a CVE: description, CVSS score/severity, weakness type and references.',
+    params: { id: 'CVE id, e.g. CVE-2021-44228' },
+    run: (a) => lookups.cve(a),
+  },
+  {
+    name: 'shodan_host', service: 'Shodan', enabled: () => Boolean(SHODAN_API_KEY),
+    description: 'Shodan data for one IP: open ports, service banners, software versions, org, location and known CVEs.',
+    params: { ip: 'IPv4 or IPv6 address' },
+    run: async (a) => {
+      const h = await shodan.host(a);
+      return {
+        ip: h.ip_str, org: h.org, isp: h.isp, asn: h.asn, os: h.os, country: h.country_name, city: h.city,
+        hostnames: h.hostnames, ports: h.ports, vulns: Object.keys(h.vulns || {}), last_update: h.last_update,
+        services: (h.data || []).map((s) => ({
+          port: s.port, transport: s.transport, product: s.product, version: s.version,
+          banner: String(s.data || '').slice(0, 200),
+        })),
+      };
+    },
+  },
+  {
+    name: 'shodan_count', service: 'Shodan', enabled: () => Boolean(SHODAN_API_KEY),
+    description: 'Count internet hosts matching a Shodan query, with top countries, ports and orgs. Works on free plans.',
+    params: { query: 'Shodan query, e.g. product:nginx country:IN' },
+    run: (a) => shodan.count(a),
+  },
+  {
+    name: 'shodan_search', service: 'Shodan', enabled: () => Boolean(SHODAN_API_KEY),
+    description: 'Search Shodan and return matching hosts (needs a paid Shodan plan for filters).',
+    params: { query: 'Shodan query' },
+    run: async (a) => {
+      const r = await shodan.search(a);
+      return {
+        total: r.total,
+        matches: (r.matches || []).slice(0, 20).map((m) => ({
+          ip: m.ip_str, port: m.port, org: m.org, product: m.product, hostnames: m.hostnames,
+          country: m.location?.country_name,
+        })),
+      };
+    },
+  },
+  {
+    name: 'shodan_domain', service: 'Shodan', enabled: () => Boolean(SHODAN_API_KEY),
+    description: 'Subdomains and DNS records Shodan knows for a domain.',
+    params: { domain: 'Domain name' },
+    run: async (a) => {
+      const r = await shodan.domain(a);
+      return { domain: r.domain, subdomains: r.subdomains, records: (r.data || []).slice(0, 100) };
+    },
+  },
+  {
+    name: 'spiderfoot_list_scans', service: 'SpiderFoot', enabled: () => Boolean(SPIDERFOOT_URL),
+    description: 'List existing SpiderFoot scans with their status and ids.',
+    params: {},
+    run: () => spiderfoot.list(),
+  },
+  {
+    name: 'spiderfoot_scan_summary', service: 'SpiderFoot', enabled: () => Boolean(SPIDERFOOT_URL),
+    description: 'Summarise the data types and counts found by a SpiderFoot scan.',
+    params: { id: 'SpiderFoot scan id' },
+    run: (a) => spiderfoot.summary(a),
+  },
+  {
+    name: 'spiderfoot_start_passive_scan', service: 'SpiderFoot', enabled: () => Boolean(SPIDERFOOT_URL),
+    description: 'Start a PASSIVE SpiderFoot scan (no direct contact with the target). Only use when the user asks for a SpiderFoot scan.',
+    params: { target: 'Domain, IP or other target' },
+    run: (a) => spiderfoot.start({ target: a.target, usecase: 'passive' }),
+  },
+];
+
+const toolByName = Object.fromEntries(TOOLS.map((t) => [t.name, t]));
+
+function toolSchemas() {
+  return TOOLS.filter((t) => t.enabled()).map((t) => ({
+    type: 'function',
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: {
+        type: 'object',
+        properties: Object.fromEntries(Object.entries(t.params).map(([k, d]) => [k, { type: 'string', description: d }])),
+        required: Object.keys(t.params),
+      },
+    },
+  }));
+}
+
+function clip(v, max = 8000) {
+  const s = JSON.stringify(v);
+  return s.length > max ? s.slice(0, max) + '…(truncated)' : s;
+}
+
+async function runTool(name, args) {
+  const t = toolByName[name];
+  if (!t || !t.enabled()) return { ok: false, error: `Tool ${name} is not available` };
+  try {
+    return { ok: true, result: await t.run(args || {}) };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// Keyword/regex router: used when Qwen is not configured, so Auto mode still works.
+function planWithoutLlm(question) {
+  const q = question.toLowerCase();
+  const ips = [...new Set(question.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g) || [])].filter((ip) => net.isIPv4(ip));
+  const cves = [...new Set((question.match(/\bCVE-\d{4}-\d{4,7}\b/gi) || []).map((c) => c.toUpperCase()))];
+  const domains = [...new Set((question.match(/\b(?:[a-z0-9-]{1,63}\.)+[a-z]{2,63}\b/gi) || [])
+    .map((d) => d.toLowerCase()).filter((d) => DOMAIN_RE.test(d) && !ips.includes(d)))];
+  const plan = [];
+  const add = (name, args) => { if (toolByName[name].enabled()) plan.push({ name, args }); };
+  for (const id of cves.slice(0, 3)) add('cve_details', { id });
+  for (const ip of ips.slice(0, 3)) {
+    add('shodan_host', { ip });
+    add('reverse_dns', { ip });
+    if (/who|owner|whois|registr|isp|network/.test(q) || !SHODAN_API_KEY) add('whois_rdap', { query: ip });
+  }
+  for (const domain of domains.slice(0, 2)) {
+    add('dns_lookup', { domain });
+    add('cert_transparency_subdomains', { domain });
+    if (/who|owner|whois|registr|expir|creat/.test(q)) add('whois_rdap', { query: domain });
+    if (/shodan|port|service|expos/.test(q)) add('shodan_domain', { domain });
+    if (/spiderfoot|full scan|deep/.test(q)) add('spiderfoot_start_passive_scan', { target: domain });
+  }
+  if (!plan.length && /shodan|how many|count|exposed|devices?/.test(q)) {
+    const m = question.match(/["“](.+?)["”]/);
+    if (m) add('shodan_count', { query: m[1] });
+  }
+  if (!plan.length && /spiderfoot|scans?/.test(q)) add('spiderfoot_list_scans', {});
+  return plan;
+}
+
+const AGENT_PROMPT = `${SYSTEM_PROMPT}
+
+You can call tools. Decide from the user's question which tools are relevant, call them (in parallel
+when independent), then answer using their results. Prefer free passive tools (DNS, RDAP, crt.sh, NVD)
+before Shodan. Do not call tools that are not needed. After the tool results, give a clear answer with
+the key findings, the security risks, and recommended next steps, including which Kali Linux tools the
+user could use next (for assets they are authorised to test).`;
+
+async function agent(b) {
+  const question = requireText(b.question, 'Question', 4000);
+  const history = (Array.isArray(b.history) ? b.history : [])
+    .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+    .slice(-10).map((m) => ({ role: m.role, content: m.content.slice(0, 8000) }));
+  const steps = [];
+
+  if (!QWEN_API_KEY) {
+    const plan = planWithoutLlm(question);
+    for (const p of plan) steps.push({ tool: p.name, args: p.args, ...(await runTool(p.name, p.args)) });
+    return {
+      mode: 'rules',
+      steps,
+      reply: plan.length
+        ? 'Ran the tools that matched your question (set QWEN_API_KEY for AI-planned lookups and a written analysis).'
+        : 'I could not find an IP, domain or CVE in your question. Include one, e.g. "What is exposed on 8.8.8.8?"',
+    };
+  }
+
+  const messages = [{ role: 'system', content: AGENT_PROMPT }, ...history, { role: 'user', content: question }];
+  const tools = toolSchemas();
+  for (let round = 0; round < 5; round++) {
+    const data = await fetchJson(`${QWEN_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${QWEN_API_KEY}` },
+      body: JSON.stringify({ model: QWEN_MODEL, messages, tools, temperature: 0.2 }),
+      timeout: 120000,
+    }, 'Qwen');
+    const msg = data.choices?.[0]?.message || {};
+    const calls = msg.tool_calls || [];
+    if (!calls.length) return { mode: 'ai', model: data.model || QWEN_MODEL, steps, reply: msg.content || '' };
+    messages.push({ role: 'assistant', content: msg.content || '', tool_calls: calls });
+    const results = await Promise.all(calls.map(async (c) => {
+      let args = {};
+      try { args = JSON.parse(c.function?.arguments || '{}'); } catch { /* leave empty */ }
+      const r = await runTool(c.function?.name, args);
+      steps.push({ tool: c.function?.name, args, ...r });
+      return { role: 'tool', tool_call_id: c.id, content: clip(r.ok ? r.result : { error: r.error }) };
+    }));
+    messages.push(...results);
+  }
+  return { mode: 'ai', model: QWEN_MODEL, steps, reply: 'Stopped after 5 rounds of tool calls; see the results above.' };
+}
+
+function listTools() {
+  return TOOLS.map((t) => ({ name: t.name, service: t.service, description: t.description, enabled: t.enabled() }));
+}
+
 // ---------------------------------------------------------------- routing
 
 const routes = {
@@ -339,6 +644,11 @@ const routes = {
   'POST /api/spiderfoot/stop': spiderfoot.stop,
   'POST /api/qwen/chat': qwenChat,
   'POST /api/graph/transform': runTransform,
+  'POST /api/agent': agent,
+  'POST /api/tools': listTools,
+  'POST /api/lookup/rdap': lookups.rdap,
+  'POST /api/lookup/crtsh': lookups.crtsh,
+  'POST /api/lookup/cve': lookups.cve,
 };
 
 function serveStatic(req, res) {
@@ -399,4 +709,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { server };
+module.exports = { server, planWithoutLlm, toolSchemas };

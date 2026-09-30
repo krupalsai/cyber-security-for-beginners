@@ -8,7 +8,7 @@ process.env.SHODAN_API_KEY = '';
 process.env.QWEN_API_KEY = '';
 process.env.SPIDERFOOT_URL = '';
 
-const { server } = require('../server');
+const { server, planWithoutLlm, toolSchemas } = require('../server');
 
 async function main() {
   await new Promise((r) => server.listen(0, r));
@@ -57,6 +57,28 @@ async function main() {
     },
     'unknown transform rejected': async () => {
       assert.strictEqual((await post('graph/transform', { transform: 'x', value: 'a.com' })).status, 400);
+    },
+    'router picks tools from the question': async () => {
+      const names = (q) => planWithoutLlm(q).map((p) => p.name);
+      assert.deepStrictEqual(names('Explain cve-2021-44228'), ['cve_details']);
+      assert.deepStrictEqual(names('who owns 8.8.8.8?'), ['reverse_dns', 'whois_rdap']); // no Shodan key
+      assert.deepStrictEqual(names('subdomains of example.com'), ['dns_lookup', 'cert_transparency_subdomains']);
+      assert.ok(names('whois example.com').includes('whois_rdap'));
+      assert.deepStrictEqual(names('hello there'), []);
+    },
+    'unconfigured tools are hidden from the AI': async () => {
+      const names = toolSchemas().map((t) => t.function.name);
+      assert.ok(names.includes('dns_lookup') && names.includes('cve_details'));
+      assert.ok(!names.some((n) => n.startsWith('shodan') || n.startsWith('spiderfoot')));
+    },
+    'agent without Qwen falls back to rules': async () => {
+      const r = await (await post('agent', { question: 'hello' })).json();
+      assert.strictEqual(r.mode, 'rules');
+      assert.deepStrictEqual(r.steps, []);
+    },
+    'tool list endpoint': async () => {
+      const tools = await (await post('tools', {})).json();
+      assert.ok(tools.find((t) => t.name === 'shodan_host' && t.enabled === false));
     },
     'invalid JSON rejected': async () => {
       const r = await fetch(`${base}/api/graph/transform`, {

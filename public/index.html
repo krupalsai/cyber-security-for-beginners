@@ -19,7 +19,7 @@
       <button data-tab="shodan">Shodan</button>
       <button data-tab="spiderfoot">SpiderFoot</button>
       <button data-tab="graph">Maltego Graph</button>
-      <button data-tab="ai">Qwen AI</button>
+      <button data-tab="ai">Ask (Auto)</button>
     </nav>
   </header>
 
@@ -29,7 +29,14 @@
       <h1>Kali-style OSINT tools in your browser</h1>
       <p class="muted">Run Shodan lookups, SpiderFoot scans, Maltego-style link graphs and ask Qwen AI to
         explain the results — from any phone or computer.</p>
+      <form id="home-ask" class="card ask">
+        <h3>Ask a question — the right tools are picked automatically</h3>
+        <textarea name="q" rows="2" placeholder="e.g. What is exposed on 8.8.8.8?  ·  Find subdomains of example.com  ·  Explain CVE-2021-44228"></textarea>
+        <button>Ask</button>
+      </form>
       <div class="cards" id="status-cards"></div>
+      <h2>Available tools</h2>
+      <div id="tool-list" class="card"></div>
       <div class="notice">
         <strong>Use responsibly.</strong> Only investigate systems, domains and people you own or have
         written permission to assess. Passive lookups (Shodan, DNS) are generally fine; active scanning of
@@ -119,11 +126,12 @@
 
     <!-- AI -->
     <section id="tab-ai" class="panel">
-      <h2>Qwen AI analyst <span id="ai-model" class="badge"></span></h2>
+      <h2>Ask — auto tool selection <span id="ai-model" class="badge"></span></h2>
       <div id="chat" class="chat"></div>
       <form id="chat-form" class="chat-form">
         <textarea name="msg" rows="2" placeholder="Ask anything — e.g. 'Explain these open ports and how to secure them' or 'How do I use nmap in Kali?'"></textarea>
         <div class="row">
+          <label class="check"><input type="checkbox" name="auto" checked> Auto-select tools</label>
           <label class="check"><input type="checkbox" name="ctx" checked> Include collected results</label>
           <button>Send</button>
           <button type="button" class="secondary" id="chat-clear">New chat</button>

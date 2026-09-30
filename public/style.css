@@ -130,3 +130,12 @@ pre { background: var(--code); padding: .75rem; border-radius: 6px; overflow: au
 dialog { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); color: var(--text); max-width: 360px; width: calc(100% - 32px); }
 dialog::backdrop { background: rgb(0 0 0 / .5); }
 dialog input { margin-bottom: .75rem; }
+
+.ask textarea { margin-bottom: .5rem; }
+.steps { margin: .5rem 0; display: grid; gap: .35rem; }
+.steps details { border: 1px solid var(--border); border-radius: 6px; padding: .35rem .6rem; background: var(--bg); }
+.steps summary { cursor: pointer; font-size: .88rem; }
+.steps .fail { color: var(--err); }
+.tool-row { display: grid; grid-template-columns: 1fr auto; gap: .1rem 1rem; padding: .4rem 0; border-bottom: 1px solid var(--border); }
+.tool-row:last-child { border-bottom: 0; }
+.tool-row code { font-weight: 600; }

@@ -135,9 +135,33 @@ async function loadConfig() {
     <div class="card"><h3>${esc(name)}</h3>
       <p class="status ${on ? 'on' : 'off'}">${on ? '● Ready' : `○ Not configured — set ${esc(env)}`}</p>
       <p class="muted">${esc(desc)}</p></div>`).join('');
-  $('#ai-model').textContent = c.qwenModel || '';
+  $('#ai-model').textContent = c.qwen ? c.qwenModel : 'rule-based (no Qwen key)';
   if (c.authRequired && !sessionPw) await askPassword();
+  loadTools();
 }
+
+async function loadTools() {
+  try {
+    const tools = await api('tools');
+    $('#tool-list').innerHTML = tools.map((t) => `<div class="tool-row">
+        <div><code>${esc(t.name)}</code> <span class="tag">${esc(t.service)}</span><div class="muted">${esc(t.description)}</div></div>
+        <span class="status ${t.enabled ? 'on' : 'off'}">${t.enabled ? '●' : '○'}</span></div>`).join('');
+  } catch (e) {
+    $('#tool-list').innerHTML = `<p class="error">${esc(e.message)}</p>`;
+  }
+}
+
+$('#home-ask').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const q = e.target.q.value.trim();
+  if (!q) return;
+  e.target.q.value = '';
+  switchTab('ai');
+  const f = $('#chat-form');
+  f.msg.value = q;
+  f.auto.checked = true;
+  f.requestSubmit();
+});
 
 // ------------------------------------------------------------ Shodan
 
@@ -316,15 +340,15 @@ const sfActions = {
 // ------------------------------------------------------------ Maltego-style graph
 
 const ENTITY = {
-  domain: { color: '#2563eb', shape: 'dot', maltego: 'maltego.Domain', transforms: [['domain.dns', 'DNS records (A/MX/NS/TXT)'], ['domain.subdomains', 'Subdomains (Shodan)']] },
-  ip: { color: '#16a34a', shape: 'dot', maltego: 'maltego.IPv4Address', transforms: [['ip.shodan', 'Ports, org, vulns (Shodan)'], ['ip.reverse', 'Reverse DNS']] },
+  domain: { color: '#2563eb', shape: 'dot', maltego: 'maltego.Domain', transforms: [['domain.dns', 'DNS records (A/MX/NS/TXT)'], ['domain.crtsh', 'Subdomains (certificate logs)'], ['domain.whois', 'WHOIS / RDAP'], ['domain.subdomains', 'Subdomains (Shodan)']] },
+  ip: { color: '#16a34a', shape: 'dot', maltego: 'maltego.IPv4Address', transforms: [['ip.shodan', 'Ports, org, vulns (Shodan)'], ['ip.reverse', 'Reverse DNS'], ['ip.whois', 'Owner network (RDAP)']] },
   mx: { color: '#9333ea', shape: 'diamond', maltego: 'maltego.MXRecord', transforms: [['mx.resolve', 'Resolve to IP']] },
   ns: { color: '#c026d3', shape: 'diamond', maltego: 'maltego.NSRecord', transforms: [['ns.resolve', 'Resolve to IP']] },
   port: { color: '#ea580c', shape: 'square', maltego: 'maltego.Port', transforms: [] },
   org: { color: '#0891b2', shape: 'triangle', maltego: 'maltego.Organization', transforms: [] },
   asn: { color: '#0e7490', shape: 'triangle', maltego: 'maltego.AS', transforms: [] },
   location: { color: '#65a30d', shape: 'star', maltego: 'maltego.Location', transforms: [] },
-  vuln: { color: '#dc2626', shape: 'hexagon', maltego: 'maltego.Phrase', transforms: [] },
+  vuln: { color: '#dc2626', shape: 'hexagon', maltego: 'maltego.Phrase', transforms: [['vuln.cve', 'CVSS score & weakness (NVD)']] },
   phrase: { color: '#6b7280', shape: 'box', maltego: 'maltego.Phrase', transforms: [] },
   email: { color: '#d97706', shape: 'dot', maltego: 'maltego.EmailAddress', transforms: [] },
   scan: { color: '#111827', shape: 'box', maltego: 'maltego.Phrase', transforms: [] },
@@ -450,12 +474,19 @@ function renderMarkdown(text) {
   return `<p>${esc(text).replace(/\n/g, '<br>')}</p>`;
 }
 
+function renderSteps(steps) {
+  return `<div class="steps">${steps.map((s) => `<details>
+      <summary class="${s.ok ? '' : 'fail'}">${s.ok ? '✔' : '✖'} <code>${esc(s.tool)}</code> ${esc(Object.values(s.args || {}).join(', '))}</summary>
+      <pre>${esc(JSON.stringify(s.ok ? s.result : s.error, null, 2))}</pre></details>`).join('')}</div>`;
+}
+
 function renderChat() {
   $('#chat').innerHTML = state.chat.map((m) => `<div class="msg ${m.role}">
-      <div class="who">${m.role === 'user' ? 'You' : 'Qwen'}</div>
+      <div class="who">${m.role === 'user' ? 'You' : 'Assistant'}</div>
+      ${m.steps?.length ? renderSteps(m.steps) : ''}
       ${m.role === 'user' ? `<p>${esc(m.content).replace(/\n/g, '<br>')}</p>` : renderMarkdown(m.content)}
-    </div>`).join('') || `<p class="muted">Ask Qwen to explain scan results, suggest Shodan queries,
-      or teach you how any Kali Linux tool works. Results you collect in other tabs are shared as context.</p>`;
+    </div>`).join('') || `<p class="muted">Ask about an IP, domain or CVE and the matching tools run automatically
+      (DNS, WHOIS/RDAP, certificate logs, NVD, Shodan, SpiderFoot). Turn off "Auto-select tools" to just chat with Qwen.</p>`;
 }
 
 $('#chat-form').addEventListener('submit', async (e) => {
@@ -469,9 +500,17 @@ $('#chat-form').addEventListener('submit', async (e) => {
   const btn = $('button', f.querySelector('.row'));
   await busy(btn, async () => {
     try {
-      const context = f.ctx.checked && state.collected.length ? JSON.stringify(state.collected) : undefined;
-      const r = await api('qwen/chat', { messages: state.chat, context });
-      state.chat.push({ role: 'assistant', content: r.reply || '(empty reply)' });
+      if (f.auto.checked) {
+        const history = state.chat.slice(0, -1).map(({ role, content }) => ({ role, content }));
+        const r = await api('agent', { question: content, history });
+        for (const s of r.steps) if (s.ok) remember(`auto.${s.tool}`, s.args, s.result);
+        state.chat.push({ role: 'assistant', content: r.reply || '(empty reply)', steps: r.steps });
+      } else {
+        const context = f.ctx.checked && state.collected.length ? JSON.stringify(state.collected) : undefined;
+        const messages = state.chat.map(({ role, content }) => ({ role, content }));
+        const r = await api('qwen/chat', { messages, context });
+        state.chat.push({ role: 'assistant', content: r.reply || '(empty reply)' });
+      }
     } catch (err) {
       state.chat.push({ role: 'assistant', content: `**Error:** ${err.message}` });
     }

@@ -8,9 +8,23 @@ or any computer, with no laptop or Kali install needed.
 | **Shodan** | Host lookup (open ports, services, banners, CVEs), search, facet counts, subdomains, DNS resolve, API credits | `SHODAN_API_KEY` |
 | **SpiderFoot** | Start passive/footprint/investigate scans, watch progress, browse findings by type, push findings into the graph | A running SpiderFoot server (`SPIDERFOOT_URL`) |
 | **Maltego Graph** | Maltego-style link graph: add a domain/IP, tap it, run transforms (DNS, reverse DNS, Shodan ports/org/vulns, subdomains). Export to **CSV for Maltego** or GraphML | Nothing for DNS transforms; Shodan key for Shodan ones |
-| **Qwen AI** | Chat with Qwen to explain results, suggest next steps and teach you any Kali tool. Results you collect in other tabs are sent as context | `QWEN_API_KEY` |
+| **Ask (Auto)** | Type a question in plain words; the right tools are **selected automatically** and run, then Qwen writes the analysis. Every tool call is shown and can be expanded | `QWEN_API_KEY` for AI planning; works without it using a keyword router |
+| **Extra lookups** | WHOIS/RDAP (domain & IP owner), certificate-transparency subdomains (crt.sh), CVE details & CVSS (NIST NVD), DNS & reverse DNS. Also available as graph transforms | Nothing, all free |
 
 > **Legal:** only investigate targets you own or have written permission to test.
+
+## How auto tool selection works
+
+The server keeps a registry of tools (see the *Available tools* list on the home page). When you ask
+something like *"What is exposed on 8.8.8.8?"* or *"Find subdomains of example.com and who registered it"*:
+
+- **With a Qwen key:** Qwen gets the list of tools that are configured, calls the ones it needs
+  (several at once, up to 5 rounds), reads the results and writes an answer with risks and next steps.
+- **Without a Qwen key:** a rule-based router spots IPs, domains and CVE ids in your question and runs
+  the matching free tools.
+
+All auto-selected tools are passive/read-only. The only SpiderFoot scan Auto mode can start is a
+*passive* one, and only when you ask for SpiderFoot. To add a tool, add an entry to `TOOLS` in `server.js`.
 
 ## 1. Get your API keys
 

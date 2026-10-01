@@ -355,14 +355,90 @@ async function runTransform(b) {
 
 const CVE_RE = /^CVE-\d{4}-\d{4,7}$/i;
 
+// RDAP: ask the authoritative registry found via IANA's bootstrap files, falling
+// back to the rdap.org redirector (which rate-limits some cloud hosts).
+const RDAP_HEADERS = { Accept: 'application/rdap+json', 'User-Agent': 'osint-web-console/1.0' };
+const rdapBootstrap = {};
+
+async function rdapServices(kind) {
+  const cached = rdapBootstrap[kind];
+  if (cached && Date.now() - cached.at < 24 * 3600e3) return cached.services;
+  const data = await fetchJson(`https://data.iana.org/rdap/${kind}.json`, { headers: RDAP_HEADERS }, 'IANA');
+  rdapBootstrap[kind] = { at: Date.now(), services: data.services || [] };
+  return rdapBootstrap[kind].services;
+}
+
+function ipToBigInt(ip) {
+  if (net.isIPv4(ip)) return { v: 4, n: ip.split('.').reduce((a, o) => (a << 8n) + BigInt(o), 0n) };
+  let [head, tail = ''] = ip.split('::');
+  const h = head ? head.split(':') : [];
+  const t = tail ? tail.split(':') : [];
+  if (t.length && t[t.length - 1].includes('.')) { // IPv4-mapped tail
+    const v4 = ipToBigInt(t.pop()).n;
+    t.push((v4 >> 16n).toString(16), (v4 & 0xffffn).toString(16));
+  }
+  const groups = ip.includes('::') ? [...h, ...Array(8 - h.length - t.length).fill('0'), ...t] : h;
+  return { v: 6, n: groups.reduce((a, g) => (a << 16n) + BigInt(parseInt(g || '0', 16)), 0n) };
+}
+
+function inCidr(ip, cidr) {
+  const [base, lenStr] = cidr.split('/');
+  const a = ipToBigInt(ip); const b = ipToBigInt(base);
+  if (a.v !== b.v) return false;
+  const bits = a.v === 4 ? 32n : 128n;
+  const len = BigInt(lenStr ?? bits);
+  const shift = bits - len;
+  return (a.n >> shift) === (b.n >> shift);
+}
+
+async function rdapBaseUrls(kind, target) {
+  if (kind === 'ip') {
+    const services = await rdapServices(net.isIPv4(target) ? 'ipv4' : 'ipv6');
+    let best = null;
+    for (const [prefixes, urls] of services) {
+      for (const p of prefixes) {
+        const len = Number(p.split('/')[1] || 0);
+        if (inCidr(target, p) && (!best || len > best.len)) best = { len, urls };
+      }
+    }
+    return best ? best.urls : [];
+  }
+  const services = await rdapServices('dns');
+  const labels = target.split('.');
+  for (let i = 0; i < labels.length; i++) {
+    const suffix = labels.slice(i).join('.');
+    const hit = services.find(([tlds]) => tlds.includes(suffix));
+    if (hit) return hit[1];
+  }
+  return [];
+}
+
+async function rdapQuery(kind, target) {
+  const errors = [];
+  try {
+    const bases = (await rdapBaseUrls(kind, target)).sort((a, b) => b.startsWith('https') - a.startsWith('https'));
+    for (const base of bases.slice(0, 2)) {
+      try {
+        return await fetchJson(`${base.replace(/\/?$/, '/')}${kind}/${encodeURIComponent(target)}`,
+          { headers: RDAP_HEADERS }, 'RDAP registry');
+      } catch (e) { errors.push(e.message); }
+    }
+  } catch (e) { errors.push(e.message); }
+  try {
+    return await fetchJson(`https://rdap.org/${kind}/${encodeURIComponent(target)}`, { headers: RDAP_HEADERS }, 'rdap.org');
+  } catch (e) {
+    errors.push(e.message);
+    throw new HttpError(502, `WHOIS/RDAP lookup failed: ${errors.join(' | ')}`);
+  }
+}
+
 const lookups = {
   // Registration data (modern WHOIS) via the RDAP bootstrap redirector.
   rdap: async (b) => {
     const q = String(b.query || '').trim();
     const kind = net.isIP(q) ? 'ip' : 'domain';
     const target = kind === 'ip' ? q : requireDomain(q);
-    const r = await fetchJson(`https://rdap.org/${kind}/${encodeURIComponent(target)}`,
-      { headers: { Accept: 'application/rdap+json' } }, 'RDAP');
+    const r = await rdapQuery(kind, target);
     const vcardName = (e) => (e.vcardArray?.[1] || []).find((f) => f[0] === 'fn')?.[3];
     return {
       query: target,
@@ -790,4 +866,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { server, planWithoutLlm, toolSchemas, verifyTelegramInitData };
+module.exports = { server, planWithoutLlm, toolSchemas, verifyTelegramInitData, inCidr };

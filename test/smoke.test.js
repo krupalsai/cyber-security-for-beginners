@@ -9,7 +9,7 @@ process.env.QWEN_API_KEY = '';
 process.env.SPIDERFOOT_URL = '';
 
 const crypto = require('crypto');
-const { server, planWithoutLlm, toolSchemas, verifyTelegramInitData } = require('../server');
+const { server, planWithoutLlm, toolSchemas, verifyTelegramInitData, inCidr } = require('../server');
 
 function signInitData(fields, token) {
   const check = Object.entries(fields).map(([k, v]) => `${k}=${v}`).sort().join('\n');
@@ -113,6 +113,13 @@ async function main() {
       assert.strictEqual(verifyTelegramInitData(tampered, token, now), null, 'tampered');
       assert.strictEqual(verifyTelegramInitData(good, token, now + 2 * 86400e3), null, 'expired');
       assert.strictEqual(verifyTelegramInitData('hash=zz', token, now), null, 'garbage');
+    },
+    'CIDR matching for RDAP bootstrap': async () => {
+      assert.ok(inCidr('8.8.8.8', '8.0.0.0/8'));
+      assert.ok(!inCidr('9.8.8.8', '8.0.0.0/8'));
+      assert.ok(inCidr('2001:4860:4860::8888', '2001:4800::/23'));
+      assert.ok(!inCidr('2a00:1450::1', '2001:4800::/23'));
+      assert.ok(!inCidr('8.8.8.8', '2001::/16'));
     },
     'invalid JSON rejected': async () => {
       const r = await fetch(`${base}/api/graph/transform`, {
